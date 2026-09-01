@@ -1,0 +1,16 @@
+[Unit]
+Description=AISlave Backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aislave/backend
+EnvironmentFile=/opt/aislave/backend/.env
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+User=aislave
+Group=aislave
+
+[Install]
+WantedBy=multi-user.target

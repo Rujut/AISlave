@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.AISlave" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#FAFAF7</item>
+        <item name="android:statusBarColor">#FAFAF7</item>
+    </style>
+</resources>
