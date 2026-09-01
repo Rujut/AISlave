@@ -25,7 +25,8 @@ class NaturalLanguageFileCommandParser {
             moveVerbs.any { normalized.containsLooseWord(it) } -> parseTransfer(cleaned, FileAction.Move)
             deleteVerbs.any { normalized.containsLooseWord(it) } -> parseSingleFile(cleaned, FileAction.Delete)
             searchVerbs.any { normalized.containsLooseWord(it) } -> parseSingleFile(cleaned, FileAction.Search)
-            else -> ParseResult.Failure("I can understand file commands like move, copy, rename, delete, create folder, search, show, list, or find.")
+            normalized in simpleGreetings -> ParseResult.Chat("Hi. I can chat, and I can help with phone file actions like move, copy, rename, delete, create folders, and search.")
+            else -> ParseResult.Chat("I can help with that. For phone file actions, tell me what to move, copy, rename, delete, create, or find.")
         }
     }
 
@@ -41,6 +42,7 @@ class NaturalLanguageFileCommandParser {
                 val end = destinationMatch?.range?.first ?: input.length
                 input.substring(start, end).cleanupPhrase()
             }
+            ?.normalizeScopeHint()
             ?.takeIf { it.isNotBlank() }
         val fileQuery = extractFileQuery(input, sourceMatch, destinationMatch, moveVerbs + copyVerbs)
         if (fileQuery.isBlank()) {
@@ -67,6 +69,7 @@ class NaturalLanguageFileCommandParser {
         val fileQuery = extractFileQuery(input, sourceMatch, renameMarker, renameVerbs)
         val sourceHint = sourceMatch
             ?.let { input.substring(it.range.last + 1, renameMarker.range.first).cleanupPhrase() }
+            ?.normalizeScopeHint()
             ?.takeIf { it.isNotBlank() }
         val newName = input.substring(renameMarker.range.last + 1).cleanupPhrase()
         if (fileQuery.isBlank() || newName.isBlank()) {
@@ -113,6 +116,7 @@ class NaturalLanguageFileCommandParser {
         val sourceMatch = findSourceMarker(input, beforeIndex = input.length)
         val sourceHint = sourceMatch
             ?.let { input.substring(it.range.last + 1).cleanupPhrase() }
+            ?.normalizeScopeHint()
             ?.takeIf { it.isNotBlank() }
         val actionVerbs = if (action == FileAction.Delete) deleteVerbs else searchVerbs
         val fileQuery = extractFileQuery(input, sourceMatch, null, actionVerbs)
@@ -178,6 +182,11 @@ class NaturalLanguageFileCommandParser {
             .trim('.', ',', ';', ':', ' ')
     }
 
+    private fun String.normalizeScopeHint(): String? {
+        val normalized = lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+        return if (normalized in currentScopeWords) null else this
+    }
+
     private companion object {
         val moveVerbs = listOf("move", "shift", "transfer", "put", "send")
         val copyVerbs = listOf("copy", "duplicate")
@@ -189,6 +198,8 @@ class NaturalLanguageFileCommandParser {
         val weakDestinationMarkers = listOf("inside", "in")
         val sourceMarkers = listOf("from", "in", "inside", "within", "under")
         val renameTargetMarkers = listOf("to", "as")
+        val simpleGreetings = setOf("hi", "hello", "hey", "hai")
+        val currentScopeWords = setOf("current", "current folder", "current directory", "this folder", "same folder", "here")
         val fillerWords = listOf(
             "the",
             "file",
@@ -222,4 +233,5 @@ data class FileCommand(
 sealed interface ParseResult {
     data class Success(val command: FileCommand) : ParseResult
     data class Failure(val message: String) : ParseResult
+    data class Chat(val message: String) : ParseResult
 }

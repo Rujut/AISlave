@@ -27,6 +27,8 @@ Milestone 2 adds the first command interpreter:
 
 Phase 3 adds an automatic backend-backed interpreter. The backend holds the OpenAI key in `OPENAI_API_KEY`; the Android APK receives only a build-time backend URL. The model only returns structured intent JSON; it never receives file contents and never executes filesystem actions directly. If the backend is off, or if the response fails validation, the app uses the local parser.
 
+The assistant can also answer normal chat messages. File actions still go through the structured tool planner and user confirmation.
+
 ## Current Phase Completion
 
 - Phase 0: Tool specifications are defined in docs and `V1ToolRegistry`.

@@ -20,6 +20,7 @@ class BackendFileCommandInterpreter : FileCommandInterpreter {
             val endpoint = "${backendUrl.trim().trimEnd('/')}/v1/interpret"
             val response = callBackend(endpoint, input)
             val json = JSONObject(response)
+            json.cleanNullable("chatMessage")?.let { return ParseResult.Chat(it) }
             val commandJson = json.optJSONObject("command") ?: json
             validateCommand(commandJson, originalText = input)
         }.getOrElse { error ->
@@ -78,7 +79,7 @@ class BackendFileCommandInterpreter : FileCommandInterpreter {
             originalText = originalText,
             action = action,
             fileQuery = json.cleanNullable("fileQuery"),
-            sourceHint = json.cleanNullable("sourceHint"),
+            sourceHint = json.cleanNullable("sourceHint").normalizeScopeHint(),
             destinationHint = json.cleanNullable("destinationHint"),
             newName = json.cleanNullable("newName"),
             folderName = json.cleanNullable("folderName")
@@ -104,5 +105,14 @@ class BackendFileCommandInterpreter : FileCommandInterpreter {
             .trim()
             .trim('.', ',', ';', ':', '"', '\'', '`', ' ')
             .takeIf { it.isNotBlank() }
+    }
+
+    private fun String?.normalizeScopeHint(): String? {
+        val normalized = this?.lowercase()?.replace(Regex("[^a-z0-9]+"), " ")?.trim()
+        return if (normalized == null || normalized in currentScopeWords) null else this
+    }
+
+    private companion object {
+        val currentScopeWords = setOf("current", "current folder", "current directory", "this folder", "same folder", "here")
     }
 }

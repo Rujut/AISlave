@@ -69,6 +69,8 @@ Command text
 
 The backend keeps `OPENAI_API_KEY` out of the APK. The remote model receives available tool specs and returns only structured intent fields. It does not receive file contents, folder listings, or Android URIs.
 
+Non-action messages return a chat response. Action messages return command intent and continue through the local resolver, planner, confirmation, execution, and verifier.
+
 ## Phase 4: Planning
 
 Commands now produce a plan before execution:

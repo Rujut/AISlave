@@ -23,10 +23,12 @@ class HybridFileCommandInterpreter(
 
         return when (val backendResult = backend.interpret(input = input, backendUrl = backendUrl)) {
             is ParseResult.Success -> backendResult
+            is ParseResult.Chat -> backendResult
             is ParseResult.Failure -> {
                 val localResult = local.interpret(input)
                 when (localResult) {
                     is ParseResult.Success -> localResult
+                    is ParseResult.Chat -> localResult
                     is ParseResult.Failure -> ParseResult.Failure("${backendResult.message} I also tried the offline parser, but it could not understand this command: ${localResult.message}")
                 }
             }

@@ -8,10 +8,12 @@ const WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 60;
 const rateLimitBuckets = new Map();
 
-const actionSchema = {
+const assistantResponseSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
+    responseType: { type: "string", enum: ["chat", "command"] },
+    chatMessage: { type: ["string", "null"] },
     action: { type: "string", enum: ["move", "copy", "rename", "delete", "create_folder", "search"] },
     fileQuery: { type: ["string", "null"] },
     sourceHint: { type: ["string", "null"] },
@@ -19,7 +21,7 @@ const actionSchema = {
     newName: { type: ["string", "null"] },
     folderName: { type: ["string", "null"] }
   },
-  required: ["action", "fileQuery", "sourceHint", "destinationHint", "newName", "folderName"]
+  required: ["responseType", "chatMessage", "action", "fileQuery", "sourceHint", "destinationHint", "newName", "folderName"]
 };
 
 const server = http.createServer(async (req, res) => {
@@ -61,9 +63,9 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const interpreted = await interpretWithOpenAI(commandText, toolContext);
+    const interpreted = await respondWithOpenAI(commandText, toolContext);
     sendJson(res, 200, {
-      command: interpreted,
+      ...interpreted,
       provider: "openai",
       model: OPENAI_MODEL
     });
@@ -76,7 +78,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`AISlave backend listening on http://0.0.0.0:${PORT}`);
 });
 
-async function interpretWithOpenAI(commandText, toolContext) {
+async function respondWithOpenAI(commandText, toolContext) {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -92,9 +94,9 @@ async function interpretWithOpenAI(commandText, toolContext) {
       text: {
         format: {
           type: "json_schema",
-          name: "file_command",
+          name: "assistant_response",
           strict: true,
-          schema: actionSchema
+          schema: assistantResponseSchema
         }
       }
     })
@@ -111,23 +113,27 @@ async function interpretWithOpenAI(commandText, toolContext) {
     throw new Error("OpenAI returned no structured output text.");
   }
 
-  const command = validateCommand(JSON.parse(outputText));
-  return command;
+  return validateAssistantResponse(JSON.parse(outputText));
 }
 
 function systemPrompt(toolContext) {
-  return `You translate a user's Android phone filesystem request into one structured command.
+  return `You are the AI assistant inside an Android personal action app.
 
 Rules:
-- Do not execute actions.
+- You may chat normally for greetings, questions, explanations, brainstorming, and non-filesystem conversation.
+- If the user asks for a phone filesystem action, return responseType "command".
+- If the user is only chatting, return responseType "chat" and answer naturally in chatMessage.
+- Do not claim you completed phone actions. The Android app executes commands only after local permission checks and user confirmation.
 - Do not invent files, folders, paths, or Android URIs.
 - Output only the JSON object required by the schema.
 - Preserve the user's intended file/search phrase, including imperfect spelling.
 - If the user mentions source area words such as Documents, Downloads, DCIM, Pictures, Music, Movies, or a named folder, put that name in sourceHint.
+- If the user says current folder, current directory, this folder, same folder, or here, set sourceHint to null. That means the app's current granted storage scope, not a folder named "current".
 - For move/copy, put the target folder in destinationHint.
 - For rename, put the existing file/search phrase in fileQuery and the requested new name in newName.
 - For create_folder, put the folder to create in folderName and parent folder in destinationHint when mentioned.
 - If the request is just to find/show/list/search, use action search.
+- For chat responses, set action to "search" and all command-specific fields to null except chatMessage.
 
 Available tools:
 ${toolContext || "search_files, move_file, copy_file, rename_file, create_folder, delete_file"}`;
@@ -148,11 +154,23 @@ function extractOutputText(responseJson) {
   return "";
 }
 
-function validateCommand(raw) {
+function validateAssistantResponse(raw) {
+  const responseType = cleanString(raw.responseType);
+  if (responseType === "chat") {
+    const chatMessage = cleanNullable(raw.chatMessage);
+    if (!chatMessage) {
+      throw new Error("Model returned an empty chat message.");
+    }
+    return { chatMessage };
+  }
+  if (responseType !== "command") {
+    throw new Error("Model returned an unsupported response type.");
+  }
+
   const command = {
     action: cleanString(raw.action),
     fileQuery: cleanNullable(raw.fileQuery),
-    sourceHint: cleanNullable(raw.sourceHint),
+    sourceHint: normalizeScopeHint(cleanNullable(raw.sourceHint)),
     destinationHint: cleanNullable(raw.destinationHint),
     newName: cleanNullable(raw.newName),
     folderName: cleanNullable(raw.folderName)
@@ -173,7 +191,7 @@ function validateCommand(raw) {
     throw new Error(`Model returned missing fields for ${command.action}.`);
   }
 
-  return command;
+  return { command };
 }
 
 function readJsonBody(req) {
@@ -217,6 +235,12 @@ function cleanString(value) {
   return typeof value === "string"
     ? value.trim().replace(/^["'`.,;:\s]+|["'`.,;:\s]+$/g, "")
     : "";
+}
+
+function normalizeScopeHint(value) {
+  const normalized = cleanString(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const currentScopeWords = new Set(["current", "current folder", "current directory", "this folder", "same folder", "here"]);
+  return currentScopeWords.has(normalized) ? null : value;
 }
 
 function setCorsHeaders(res) {

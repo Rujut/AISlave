@@ -483,6 +483,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             when (val parsed = commandInterpreter.interpret(snapshot.commandText, backendUrl)) {
                 is ParseResult.Failure -> _state.value = _state.value.copy(message = parsed.message)
                 is ParseResult.Success -> handleParsedCommand(rootUri, parsed.command)
+                is ParseResult.Chat -> _state.value = _state.value.copy(
+                    files = emptyList(),
+                    selectedFileUri = null,
+                    pendingDestinationFolderUri = null,
+                    pendingDestinationName = null,
+                    pendingCommand = null,
+                    pendingPlan = null,
+                    message = parsed.message
+                )
             }
         }
     }

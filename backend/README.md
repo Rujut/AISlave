@@ -8,7 +8,13 @@ The phone sends only command text and tool descriptions to:
 POST /v1/interpret
 ```
 
-The server returns one validated filesystem command:
+The server returns either a normal chat reply or one validated filesystem command:
+
+```json
+{
+  "chatMessage": "Hi. How can I help?"
+}
+```
 
 ```json
 {
