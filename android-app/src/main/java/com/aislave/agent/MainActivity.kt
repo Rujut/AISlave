@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,15 +21,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -47,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -118,7 +124,7 @@ fun AgentApp(viewModel: MainViewModel = viewModel()) {
         onResult = { viewModel.refreshFullAccessState() }
     )
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Android Action Agent") }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("AISlave") }) }) { padding ->
         Surface(
             modifier = Modifier
                 .fillMaxSize()
@@ -128,59 +134,33 @@ fun AgentApp(viewModel: MainViewModel = viewModel()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Milestone 2", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    text = if (state.accessMode == AccessMode.NotAsked) {
-                        "Choose storage access to start."
-                    } else {
-                        "Type a command, review the plan, then confirm execution."
-                    },
-                    style = MaterialTheme.typography.bodyMedium
+                AccessBar(
+                    accessMode = state.accessMode,
+                    scopeName = state.storageScopeName,
+                    canUndo = state.canUndo,
+                    onFullAccess = { fullAccessLauncher.launch(createFullAccessIntent()) },
+                    onLimitedAccess = { limitedAccessLauncher.launch(null) },
+                    onDenied = viewModel::denyAccess,
+                    onUndo = viewModel::undoLastMove
                 )
 
-                if (state.accessMode == AccessMode.NotAsked) {
-                    AccessPanel(
-                        onFullAccess = { fullAccessLauncher.launch(createFullAccessIntent()) },
-                        onLimitedAccess = { limitedAccessLauncher.launch(null) },
-                        onDenied = viewModel::denyAccess
-                    )
-                } else {
-                    AccessStatus(accessMode = state.accessMode, scopeName = state.storageScopeName)
-                }
+                ChatTimeline(
+                    state = state,
+                    onSelect = viewModel::selectFile,
+                    onUseSelection = viewModel::planSelectedCandidate,
+                    onConfirm = viewModel::confirmPlan,
+                    onCancel = viewModel::cancelPlan
+                )
 
-                CommandPanel(
+                ChatComposer(
                     commandText = state.commandText,
                     canRun = state.canRunCommand,
                     onCommandChange = viewModel::setCommandText,
                     onRun = viewModel::runCommand
                 )
-
-                state.pendingPlan?.let { plan ->
-                    PlanPanel(
-                        plan = plan,
-                        onConfirm = viewModel::confirmPlan,
-                        onCancel = viewModel::cancelPlan
-                    )
-                }
-
-                FileListPanel(
-                    files = state.files,
-                    selectedUri = state.selectedFileUri,
-                    canUseSelection = state.canUseSelectedCandidate,
-                    onSelect = viewModel::selectFile,
-                    onUseSelection = viewModel::planSelectedCandidate
-                )
-
-                OutlinedButton(enabled = state.canUndo, onClick = viewModel::undoLastMove) {
-                    Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = null)
-                    Text("Undo")
-                }
-
-                StatusPanel(message = state.message, transaction = state.lastTransaction)
             }
         }
     }
@@ -191,6 +171,187 @@ private fun createFullAccessIntent(): Intent {
         Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
     } else {
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.aislave.agent"))
+    }
+}
+
+@Composable
+private fun AccessBar(
+    accessMode: AccessMode,
+    scopeName: String?,
+    canUndo: Boolean,
+    onFullAccess: () -> Unit,
+    onLimitedAccess: () -> Unit,
+    onDenied: () -> Unit,
+    onUndo: () -> Unit
+) {
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = 1.dp
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text("Storage", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            accessLabel(accessMode, scopeName),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                IconButton(enabled = canUndo, onClick = onUndo) {
+                    Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = "Undo last move")
+                }
+            }
+            if (accessMode == AccessMode.NotAsked || accessMode == AccessMode.Denied) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onFullAccess) { Text("Full") }
+                    OutlinedButton(onClick = onLimitedAccess) { Text("Limited") }
+                    TextButton(onClick = onDenied) { Text("Denied") }
+                }
+            }
+        }
+    }
+}
+
+private fun accessLabel(accessMode: AccessMode, scopeName: String?): String {
+    return when (accessMode) {
+        AccessMode.Full -> "Full access - ${scopeName ?: "Internal Storage"}"
+        AccessMode.Limited -> "Limited access - ${scopeName ?: "Selected folder"}"
+        AccessMode.Denied -> "Access denied"
+        AccessMode.NotAsked -> "Choose access to enable file actions"
+    }
+}
+
+@Composable
+private fun ColumnScope.ChatTimeline(
+    state: MainUiState,
+    onSelect: (Uri) -> Unit,
+    onUseSelection: () -> Unit,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.messages.size, state.message, state.pendingPlan, state.files.size) {
+        listState.animateScrollToItem((state.messages.size + 3).coerceAtLeast(0))
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f),
+        state = listState,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        items(state.messages, key = { it.id }) { message ->
+            ChatBubble(message)
+        }
+        if (state.message.isNotBlank()) {
+            item(key = "status") {
+                ChatBubble(ChatMessage(id = -1, role = ChatRole.Assistant, text = state.message))
+            }
+        }
+        state.pendingPlan?.let { plan ->
+            item(key = "plan") {
+                PlanPanel(plan = plan, onConfirm = onConfirm, onCancel = onCancel)
+            }
+        }
+        if (state.files.isNotEmpty()) {
+            item(key = "files") {
+                FileListPanel(
+                    files = state.files,
+                    selectedUri = state.selectedFileUri,
+                    canUseSelection = state.canUseSelectedCandidate,
+                    onSelect = onSelect,
+                    onUseSelection = onUseSelection
+                )
+            }
+        }
+        state.lastTransaction?.let { transaction ->
+            item(key = "transaction") {
+                TransactionNote(transaction)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatBubble(message: ChatMessage) {
+    val isUser = message.role == ChatRole.User
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(if (isUser) 0.86f else 0.92f),
+            color = if (isUser) MaterialTheme.colorScheme.primary else Color.White,
+            shape = RoundedCornerShape(
+                topStart = 18.dp,
+                topEnd = 18.dp,
+                bottomStart = if (isUser) 18.dp else 4.dp,
+                bottomEnd = if (isUser) 4.dp else 18.dp
+            ),
+            tonalElevation = if (isUser) 0.dp else 1.dp
+        ) {
+            Text(
+                text = message.text,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                color = if (isUser) Color.White else Color(0xFF202320),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChatComposer(
+    commandText: String,
+    canRun: Boolean,
+    onCommandChange: (String) -> Unit,
+    onRun: () -> Unit
+) {
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = commandText,
+                onValueChange = onCommandChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 56.dp, max = 132.dp),
+                singleLine = false,
+                minLines = 1,
+                maxLines = 4,
+                placeholder = { Text("Message AISlave") }
+            )
+            Button(
+                enabled = canRun,
+                onClick = onRun,
+                modifier = Modifier.size(56.dp),
+                shape = CircleShape
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = "Send")
+            }
+        }
     }
 }
 
@@ -256,7 +417,7 @@ private fun CommandPanel(
                     onClick = onRun,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+                    Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null)
                     Text("Run")
                 }
             }
@@ -349,12 +510,39 @@ private fun StatusPanel(message: String, transaction: MoveTransaction?) {
     }
 }
 
+@Composable
+private fun TransactionNote(transaction: MoveTransaction) {
+    Surface(color = Color.Transparent) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
+            IconButton(onClick = {}, enabled = false) {
+                Icon(Icons.Outlined.History, contentDescription = null)
+            }
+            Text(
+                text = "Last transaction: ${transaction.fileName}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
+    }
+}
+
 enum class AccessMode {
     NotAsked,
     Full,
     Limited,
     Denied
 }
+
+enum class ChatRole {
+    User,
+    Assistant
+}
+
+data class ChatMessage(
+    val id: Long,
+    val role: ChatRole,
+    val text: String
+)
 
 data class MainUiState(
     val accessMode: AccessMode = AccessMode.NotAsked,
@@ -368,14 +556,19 @@ data class MainUiState(
     val useBackendAi: Boolean = true,
     val backendUrl: String = AiSettingsStore.DEFAULT_BACKEND_URL,
     val commandText: String = "",
+    val messages: List<ChatMessage> = listOf(
+        ChatMessage(
+            id = 1L,
+            role = ChatRole.Assistant,
+            text = "Hi, I am ready. Ask me normally, or tell me a file action like move, copy, rename, delete, create folder, or find."
+        )
+    ),
     val pendingPlan: AgentPlan? = null,
-    val message: String = "Ready",
+    val message: String = "",
     val lastTransaction: MoveTransaction? = null
 ) {
     val canUndo: Boolean = lastTransaction?.undone == false
-    val canRunCommand: Boolean = commandText.isNotBlank() &&
-        accessMode != AccessMode.Denied &&
-        storageRootUri != null
+    val canRunCommand: Boolean = commandText.isNotBlank()
     val canUseSelectedCandidate: Boolean = selectedFileUri != null && pendingCommand != null
 }
 
@@ -470,19 +663,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun runCommand() {
         val snapshot = _state.value
         val rootUri = snapshot.storageRootUri
-        if (rootUri == null) {
-            _state.value = snapshot.copy(message = "Choose Full, Limited, or Denied first.")
-            return
-        }
-        _state.value = snapshot.copy(message = "Searching granted storage...")
+        val prompt = snapshot.commandText.trim()
+        if (prompt.isBlank()) return
+        _state.value = snapshot.copy(
+            commandText = "",
+            files = emptyList(),
+            selectedFileUri = null,
+            pendingDestinationFolderUri = null,
+            pendingDestinationName = null,
+            pendingCommand = null,
+            pendingPlan = null,
+            messages = snapshot.messages + ChatMessage(
+                id = Instant.now().toEpochMilli(),
+                role = ChatRole.User,
+                text = prompt
+            ),
+            message = "Thinking..."
+        )
 
         viewModelScope.launch {
-            val backendUrl = if (snapshot.useBackendAi) snapshot.backendUrl else ""
+            val current = _state.value
+            val backendUrl = if (current.useBackendAi) current.backendUrl else ""
             val modeLabel = if (backendUrl.isBlank()) "local parser" else "backend AI"
             _state.value = _state.value.copy(message = "Understanding command with $modeLabel...")
-            when (val parsed = commandInterpreter.interpret(snapshot.commandText, backendUrl)) {
+            when (val parsed = commandInterpreter.interpret(prompt, backendUrl)) {
                 is ParseResult.Failure -> _state.value = _state.value.copy(message = parsed.message)
-                is ParseResult.Success -> handleParsedCommand(rootUri, parsed.command)
+                is ParseResult.Success -> {
+                    if (rootUri == null || snapshot.accessMode == AccessMode.Denied) {
+                        _state.value = _state.value.copy(message = "I can do that after storage access is allowed. Choose Full or Limited access above.")
+                    } else {
+                        handleParsedCommand(rootUri, parsed.command)
+                    }
+                }
                 is ParseResult.Chat -> _state.value = _state.value.copy(
                     files = emptyList(),
                     selectedFileUri = null,
